@@ -40,6 +40,14 @@
 .cathead{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);padding:14px 0 4px;border-top:1px solid var(--line)}
 .cathead:first-child{border-top:0;padding-top:0}
 .usdnote{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.cmpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:8px}
+.cmp{border-collapse:collapse;font-size:12.5px;min-width:640px;width:100%}
+.cmp th,.cmp td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cmp th:first-child,.cmp td:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+.cmp thead th{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:var(--surface-2)}
+.cmp thead th:first-child{background:var(--surface-2)}
+.cmp tr.grp td{background:var(--accent-soft);color:var(--accent);font-weight:700;text-align:left;font-size:12px}
+.cmp a{color:var(--accent)}
 /* Reset que en Claude venía incluido: sin [hidden] las pestañas y avisos ocultos se seguirían viendo. */
 [hidden]{display:none!important}
 html{color-scheme:light dark;-webkit-text-size-adjust:100%}
@@ -268,6 +276,9 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
   <div class="block">
     <h2>Catálogo</h2>
     <p class="note" style="margin:0">Precios en <b id="catCur">ARS</b>, por unidad. Para cambiar precios, fichas o agregar equipos, editá la pestaña <b>Catálogo</b> de la planilla y tocá <b>Actualizar</b> en Contactos.</p>
+    <h2 style="margin-top:6px">Comparar modelos</h2>
+    <div class="cmpwrap"><div id="cmpTable"></div></div>
+    <h2 style="margin-top:6px">Lista completa</h2>
     <div id="catList"></div>
   </div>
 </section>
@@ -437,7 +448,9 @@ function renderPick(){
   let lastCat = null;
   $('#pickList').innerHTML = (usdRateLine() ? `<div class="usdnote">${esc(usdRateLine())}</div>` : '') + list.map(p => {
     const cov = Number(p.coverage); const sug = area > 0 && cov > 0 ? Math.ceil(area / cov) : 0;
-    const spec = [p.watts ? p.watts+' W' : '', p.ppf ? p.ppf+' µmol/s' : '', cov ? 'cubre '+cov+' m²' : '', p.usdPrice ? 'USD ' + fmtUsd(p.usdPrice) : ''].filter(Boolean).map(s=>`<span>${esc(s)}</span>`).join('');
+    const spec = [p.watts ? p.watts+' W' : '', p.ppf ? p.ppf+' µmol/s' : '', p.eff ? p.eff+' µmol/J' : '',
+      p.ppfdAvg ? 'PPFD ' + p.ppfdAvg : '', p.coverageText ? 'alcance ' + p.coverageText.replace(/x/g,'×') + ' cm' : '',
+      p.usdPrice ? 'USD ' + fmtUsd(p.usdPrice) : ''].filter(Boolean).map(s=>`<span>${esc(s)}</span>`).join('');
     const head = (p.category || '') !== lastCat && p.category ? `<div class="cathead">${esc(p.category)}</div>` : '';
     lastCat = p.category || '';
     return head + `<div class="prod">
@@ -1069,7 +1082,21 @@ function openLead(id){
 }
 
 /* ---------- catálogo (se edita en la planilla) ---------- */
+function renderCompare(){
+  const rows = [...st.catalog].filter(p => p.ppf || p.eff).sort((a,b) => (a.order??99)-(b.order??99));
+  if(!rows.length){ $('#cmpTable').innerHTML = '<div class="empty">Cargá los datos de las fichas en la planilla para comparar.</div>'; return; }
+  let cat = null;
+  const num = (v, suf='') => v ? Number(v).toLocaleString('es-AR') + suf : '—';
+  $('#cmpTable').innerHTML = `<table class="cmp"><thead><tr><th>Modelo</th><th>W</th><th>PPF</th><th>µmol/J</th><th>PPFD 40 cm</th><th>Alcance</th><th>Medidas</th><th>Peso</th><th>Barras</th><th>Contado</th><th>Ficha</th></tr></thead><tbody>${
+    rows.map(p => { const g = p.category && p.category !== cat ? `<tr class="grp"><td colspan="11">${esc(p.category)}</td></tr>` : ''; cat = p.category;
+      return g + `<tr><td>${esc(p.sku || p.name)}</td><td>${num(p.watts)}</td><td>${num(p.ppf)}</td><td>${p.eff ? esc(p.eff) : '—'}</td>
+        <td>${p.ppfdAvg ? num(p.ppfdAvg) + ' / ' + num(p.ppfdMax) : '—'}</td><td>${esc((p.coverageText||'').replace(/x/g,'×')) || '—'}</td>
+        <td>${esc(p.dims) || '—'}</td><td>${p.kg ? num(p.kg, ' kg') : '—'}</td><td>${num(p.bars)}</td>
+        <td>${Number(p.price) > 0 ? money(p.price) : 'sin precio'}</td><td>${p.specUrl ? `<a href="${esc(p.specUrl)}" target="_blank" rel="noopener">PDF</a>` : ''}</td></tr>`; }).join('')
+  }</tbody></table>`;
+}
 function renderCatalog(){
+  renderCompare();
   $('#catCur').textContent = st.settings.currency + (usdRateLine() ? ' · ' + usdRateLine() : '');
   const list = [...st.catalog].sort((a,b) => (a.order??99)-(b.order??99) || String(a.name).localeCompare(b.name));
   $('#catList').innerHTML = list.length ? list.map(p => `<div class="prod">
