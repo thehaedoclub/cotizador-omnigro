@@ -445,6 +445,13 @@ function setQty(p, q){
     usdPrice:p.usdPrice||null, usdList:p.usdList||null, usdRate:p.usdRate||null});
   renderPick(); saveDraft();
 }
+// Un borrador guardado de ayer, o un precio cambiado en la planilla: el carrito toma los precios del catálogo actual.
+function syncCart(){
+  st.cart.forEach(l => { const p = st.catalog.find(x => x.id === l.key); if(!p || !(Number(p.price) > 0)) return;
+    Object.assign(l, {name:p.name, price:Number(p.price), listPrice:Number(p.listPrice)||0, d1:Number(p.d1)||0, d2:Number(p.d2)||0,
+      usdPrice:p.usdPrice||null, usdList:p.usdList||null, usdRate:p.usdRate||null, specUrl:p.specUrl||''}); });
+  saveDraft();
+}
 function renderPick(){
   const list = activeCatalog(); const area = parseFloat($('#c_area').value);
   if(!list.length){ $('#pickList').innerHTML = `<div class="empty">El catálogo está vacío. Cargá los equipos en la pestaña Catálogo de la planilla.</div>`; renderSummary(); return; }
@@ -612,7 +619,7 @@ function openSpecs(who){
     const out = p.querySelector('#sp_out');
     if(!items.length){ out.innerHTML = '<p class="note">Elegí al menos un equipo.</p>'; return; }
     const groups = specGroups(items), seller = ls.get('og_seller','');
-    const lines = [`¡Hola${name ? ' ' + name.split(' ')[0] : ''}! Te paso la ficha técnica de Omnigro Canopy Master Pro:`, ''];
+    const lines = [`¡Hola${name ? ' ' + name.split(' ')[0] : ''}! Te paso ${groups.length > 1 ? 'las fichas técnicas' : 'la ficha técnica'} de Omnigro:`, ''];
     groups.forEach(g => { lines.push(`📄 ${g.names.join(', ')}`); lines.push(g.url); lines.push(''); });
     lines.push('Cualquier duda te asesoramos según el tamaño de tu sala.');
     lines.push(`${seller ? seller + ' · ' : ''}Omnigro${st.settings.web ? ' · ' + st.settings.web : ''}`);
@@ -778,7 +785,7 @@ async function refresh(){
   try{
     const r = await api('bootstrap', pin());
     st.settings = Object.assign({}, DEFAULTS, r.settings || {}); ls.set('og_settings', st.settings);
-    st.catalog = r.catalog || []; ls.set('og_catalog', st.catalog);
+    st.catalog = r.catalog || []; ls.set('og_catalog', st.catalog); syncCart();
     st.contacts = r.contacts || []; cacheContacts();
     st.sheetUrl = r.sheetUrl || ''; ls.set('og_sheet', st.sheetUrl);
     const inSheet = new Set(st.contacts.map(q => q.id)), before = st.pending.length;
@@ -1046,7 +1053,7 @@ function openLead(id){
       ${(q.items||[]).length ? `<dt>Reserva</dt><dd>${q.reserve ? (q.status === 'perdida' ? 'Liberada (perdida)' : 'Sí, unidades bloqueadas') : 'No'}${q.reserveNote ? ' · ' + esc(q.reserveNote) : ''}</dd>` : ''}
       <dt>N°</dt><dd>${esc(q.number)} · ${esc(fmtDate(q.createdAt))}${q.seller ? ' · '+esc(q.seller):''}</dd>
     </dl>
-    <div class="lines">${items}${q.total ? `<div style="font-weight:700"><span>Total${q.discountPct ? ' (−'+q.discountPct+'%)':''}</span><span>${money(q.total,q.currency)}</span></div>`:''}</div>
+    <div class="lines">${items}${q.total ? `<div style="font-weight:700"><span>Total contado${q.discountPct ? ' (−'+q.discountPct+'%)':''}</span><span>${money(q.total,q.currency)}</span></div>`:''}${q.total && payOf(q).pay !== 'contado' ? (pi => `<div><span>${esc(pi.label)} (+${pi.pct}%)</span><span>${money(pi.total,q.currency)} · ${pi.n} × ${money(pi.each,q.currency)}</span></div>`)(payOf(q)) : ''}</div>
     <div class="row">
       <label class="f">Estado<select id="d_status">${Object.entries(STATUS).map(([k,v]) => `<option value="${k}"${q.status===k?' selected':''}>${v}</option>`).join('')}</select></label>
       <label class="f">Interés<select id="d_interest">${Object.entries(INTEREST).map(([k,v]) => `<option value="${k}"${q.interest===k?' selected':''}>${v}</option>`).join('')}</select></label>
