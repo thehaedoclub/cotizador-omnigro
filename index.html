@@ -83,6 +83,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .seg button[aria-pressed="true"][data-v="frio"]{background:var(--cold);border-color:var(--cold);color:#fff}
 .seg button[aria-pressed="true"][data-v="tibio"]{background:var(--warm);border-color:var(--warm);color:#fff}
 .seg button[aria-pressed="true"][data-v="caliente"]{background:var(--hot);border-color:var(--hot);color:#fff}
+.seg.pay button{font-size:13px;line-height:1.25}
+.seg.pay button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:11px 14px;font:600 14.5px var(--f-body);cursor:pointer;text-decoration:none;text-align:center}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -227,6 +229,13 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
     <label class="check" id="reserveRow" hidden><input type="checkbox" id="q_reserve" checked><span>Reservar estas unidades del stock de la expo (se bloquean para el resto del equipo)</span></label>
     <div class="warnline" id="stockWarn" hidden></div>
     <label class="f">Notas internas (no van al cliente)<textarea id="q_notes" placeholder="Lo que charlaron, carpa, plazos, forma de pago…"></textarea></label>
+    <div class="f" style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:var(--muted)">Forma de pago</span>
+      <div class="seg pay" id="payPlan" role="group" aria-label="Forma de pago">
+        <button type="button" data-v="contado" aria-pressed="true">Contado / transferencia</button>
+        <button type="button" data-v="3" aria-pressed="false">Tarjeta 3 cuotas</button>
+        <button type="button" data-v="6" aria-pressed="false">Tarjeta 6 cuotas</button>
+      </div>
+    </div>
     <div class="totals" id="totals"></div>
     <div class="actions">
       <button class="btn primary" type="button" id="saveBtn">Guardar y preparar WhatsApp</button>
@@ -309,7 +318,7 @@ const st = {
   catalog: ls.get('og_catalog', []),
   settings: Object.assign({}, DEFAULTS, ls.get('og_settings', {})),
   contacts: ls.get('og_contacts', []), pending: ls.get('og_pending', []),
-  cart: [], interest:'tibio', discTouched:false
+  cart: [], interest:'tibio', pay:'contado', discTouched:false
 };
 
 /* ---------- helpers ---------- */
@@ -360,11 +369,11 @@ $('#s_seller').addEventListener('change', () => { ls.set('og_seller', $('#s_sell
 
 /* draft persistence so a reload mid-conversation doesn't lose data */
 const DRAFT_FIELDS = ['c_name','c_company','c_phone','c_email','c_city','c_province','c_type','c_area','c_current','c_source','q_notes','q_disc','q_valid'];
-function saveDraft(){ const d = {cart:st.cart, interest:st.interest, consent:$('#c_consent').checked};
+function saveDraft(){ const d = {cart:st.cart, interest:st.interest, pay:st.pay, consent:$('#c_consent').checked};
   DRAFT_FIELDS.forEach(f => d[f] = $('#'+f).value); ls.set('og_draft', d); }
 function loadDraft(){ const d = ls.get('og_draft', null); if(!d) return;
   DRAFT_FIELDS.forEach(f => { if(d[f] != null && d[f] !== '') $('#'+f).value = d[f]; });
-  st.cart = Array.isArray(d.cart) ? d.cart : []; st.interest = d.interest || 'tibio'; $('#c_consent').checked = d.consent !== false;
+  st.cart = Array.isArray(d.cart) ? d.cart : []; st.interest = d.interest || 'tibio'; st.pay = d.pay || 'contado'; $('#c_consent').checked = d.consent !== false;
   if(d.q_disc !== '' && d.q_disc != null) st.discTouched = true;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v===st.interest));
   $('#c_phone').dispatchEvent(new Event('input')); }
@@ -455,6 +464,21 @@ function plans(total){
   const t3 = Math.round(total * (1 + s3/100)), t6 = Math.round(total * (1 + s6/100));
   return {s3, s6, t3, t6, c3: Math.round(t3/3), c6: Math.round(t6/6)};
 }
+// Forma de pago elegida: contado sin recargo; tarjeta en 3 o 6 cuotas con su recargo.
+const PAY_LABEL = {contado:'Contado / transferencia', 3:'Tarjeta de crédito en 3 cuotas', 6:'Tarjeta de crédito en 6 cuotas'};
+function payInfo(total, pay, pl){
+  pl = pl || plans(total);
+  if(pay === '3') return {pay, label:PAY_LABEL[3], pct:pl.s3, n:3, total:pl.t3, each:pl.c3};
+  if(pay === '6') return {pay, label:PAY_LABEL[6], pct:pl.s6, n:6, total:pl.t6, each:pl.c6};
+  return {pay:'contado', label:PAY_LABEL.contado, pct:0, n:1, total, each:total};
+}
+function payOf(q){
+  const code = q.payment === PAY_LABEL[3] ? '3' : q.payment === PAY_LABEL[6] ? '6' : (q.pay || 'contado');
+  return payInfo(q.total, code, plansOf(q));
+}
+$('#payPlan').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return;
+  st.pay = b.dataset.v; saveDraft(); renderSummary(); });
+
 function plansOf(q){
   if(q.total3 && q.total6) return {s3:q.surcharge3, s6:q.surcharge6, t3:q.total3, t6:q.total6, c3:Math.round(q.total3/3), c6:Math.round(q.total6/6)};
   return plans(q.total);
@@ -472,8 +496,16 @@ function renderSummary(){
     : `<div class="note">Sin equipos todavía. Sumalos con los botones + de arriba.</div>`;
   $('#totals').innerHTML = `<div><span>Subtotal</span><span>${money(c.subtotal)}</span></div>`
     + (c.disc ? `<div><span>Descuento expo ${c.disc}%</span><span>−${money(c.discount)}</span></div>` : '')
-    + `<div class="grand"><span>Total contado</span><span>${money(c.total)}</span></div>`
-    + (c.total ? (pl => `<div><span>3 cuotas (+${pl.s3}%)</span><span>3 × ${money(pl.c3)} = ${money(pl.t3)}</span></div><div><span>6 cuotas (+${pl.s6}%)</span><span>6 × ${money(pl.c6)} = ${money(pl.t6)}</span></div>`)(plans(c.total)) : '');
+    + (pi => pi.pay === 'contado'
+        ? `<div class="grand"><span>Total a pagar (contado)</span><span>${money(c.total)}</span></div>`
+        : `<div><span>Precio contado</span><span>${money(c.total)}</span></div><div><span>Recargo tarjeta ${pi.n} cuotas (+${pi.pct}%)</span><span>+${money(pi.total - c.total)}</span></div>`
+          + `<div class="grand"><span>Total a pagar</span><span>${money(pi.total)}</span></div><div><span>${pi.n} cuotas de</span><span>${money(pi.each)}</span></div>`)(payInfo(c.total, st.pay));
+  $('#payPlan').querySelectorAll('button').forEach(x => {
+    x.setAttribute('aria-pressed', x.dataset.v === st.pay);
+    const pl = plans(c.total);
+    if(x.dataset.v === '3') x.textContent = `Tarjeta 3 cuotas (+${pl.s3}%)`;
+    if(x.dataset.v === '6') x.textContent = `Tarjeta 6 cuotas (+${pl.s6}%)`;
+  });
   const controlled = st.cart.some(l => hasStock(st.catalog.find(x => x.id === l.key)));
   $('#reserveRow').hidden = !controlled;
   const short = controlled && reserving() ? cartShortages() : [];
@@ -495,10 +527,16 @@ function buildMessage(q){
     : `• ${l.qty} × ${l.name} — ${money(l.price,cur)} c/u = *${money(l.price*l.qty,cur)}*`));
   out.push('');
   if(q.discountPct){ out.push(`Subtotal: ${money(q.subtotal,cur)}`); out.push(`Descuento Expo (${q.discountPct}%): −${money(q.discount,cur)}`); }
-  out.push(`*TOTAL CONTADO: ${money(q.total,cur)}*`);
-  if(q.total){ const pl = plansOf(q);
-    out.push(`💳 3 cuotas de ${money(pl.c3,cur)} (total ${money(pl.t3,cur)}, +${pl.s3}%)`);
-    out.push(`💳 6 cuotas de ${money(pl.c6,cur)} (total ${money(pl.t6,cur)}, +${pl.s6}%)`); }
+  const pi = payOf(q);
+  if(pi.pay === 'contado'){
+    out.push(`*TOTAL CONTADO / TRANSFERENCIA: ${money(q.total,cur)}*`);
+    if(q.total){ const pl = plansOf(q);
+      out.push(`Con tarjeta de crédito: 3 cuotas de ${money(pl.c3,cur)} (+${pl.s3}%) o 6 cuotas de ${money(pl.c6,cur)} (+${pl.s6}%).`); }
+  } else {
+    out.push(`Precio contado: ${money(q.total,cur)}`);
+    out.push(`💳 ${pi.label} (recargo ${pi.pct}%)`);
+    out.push(`*TOTAL A PAGAR: ${money(pi.total,cur)}* → ${pi.n} cuotas de *${money(pi.each,cur)}*`);
+  }
   if(q.reserve && !st.pending.some(x => x.id === q.id)) out.push('✅ Te reservamos estas unidades del stock de la expo.');
   if(isDriveUrl(q.pdfUrl)){ out.push(''); out.push(`📎 Cotización en PDF: ${q.pdfUrl}`); }
   out.push('');
@@ -631,10 +669,18 @@ async function quoteCanvas(q, noLogo){
     tl('Subtotal', money(q.subtotal,cur), `400 24px ${B}`, muted); y += 40;
     tl(`Descuento Expo ${q.discountPct}%`, '−' + money(q.discount,cur), `400 24px ${B}`, accent); y += 56;
   }
-  tl('TOTAL CONTADO', money(q.total,cur), `800 40px ${D}`, ink); y += 56;
-  if(q.total){ const pl = plansOf(q);
-    tl(`3 cuotas de ${money(pl.c3,cur)} (+${pl.s3}%)`, money(pl.t3,cur), `400 24px ${B}`, muted); y += 38;
-    tl(`6 cuotas de ${money(pl.c6,cur)} (+${pl.s6}%)`, money(pl.t6,cur), `400 24px ${B}`, muted); y += 20; }
+  const pi = payOf(q);
+  if(pi.pay === 'contado'){
+    tl('TOTAL CONTADO', money(q.total,cur), `800 40px ${D}`, ink); y += 56;
+    if(q.total){ const pl = plansOf(q);
+      tl(`Tarjeta 3 cuotas de ${money(pl.c3,cur)} (+${pl.s3}%)`, money(pl.t3,cur), `400 24px ${B}`, muted); y += 38;
+      tl(`Tarjeta 6 cuotas de ${money(pl.c6,cur)} (+${pl.s6}%)`, money(pl.t6,cur), `400 24px ${B}`, muted); y += 20; }
+  } else {
+    tl('Precio contado', money(q.total,cur), `400 24px ${B}`, muted); y += 40;
+    tl(`Recargo tarjeta ${pi.n} cuotas (+${pi.pct}%)`, '+' + money(pi.total - q.total,cur), `400 24px ${B}`, accent); y += 56;
+    tl('TOTAL A PAGAR', money(pi.total,cur), `800 40px ${D}`, ink); y += 44;
+    tl(`${pi.label}: ${pi.n} cuotas de`, money(pi.each,cur), `600 26px ${B}`, ink); y += 20;
+  }
   x.textAlign='left'; y += 50;
 
   // condiciones
@@ -767,7 +813,8 @@ function collect(leadOnly){
     currency: st.settings.currency,
     discountPct: leadOnly ? 0 : c.disc, subtotal: leadOnly ? 0 : c.subtotal, discount: leadOnly ? 0 : c.discount, total: leadOnly ? 0 : c.total,
     validityDays: parseInt($('#q_valid').value) || st.settings.validityDays,
-    ...(leadOnly ? {} : (pl => ({surcharge3: pl.s3, surcharge6: pl.s6, total3: pl.t3, total6: pl.t6}))(plans(c.total))),
+    ...(leadOnly ? {} : (pl => ({surcharge3: pl.s3, surcharge6: pl.s6, total3: pl.t3, total6: pl.t6,
+      payment: payInfo(c.total, st.pay, pl).label, totalToPay: payInfo(c.total, st.pay, pl).total}))(plans(c.total))),
     notes: $('#q_notes').value.trim(),
     status: 'nueva', kind: leadOnly ? 'contacto' : 'cotizacion', event: st.settings.event || 'Expo Cannabis 2026'
   };
@@ -795,7 +842,7 @@ $('#leadOnlyBtn').addEventListener('click', () => save(true));
 $('#clearBtn').addEventListener('click', () => { resetForm(); toast('Formulario limpio'); });
 function resetForm(){
   ['c_name','c_company','c_phone','c_email','c_city','c_area','q_notes','x_name','x_price'].forEach(f => $('#'+f).value='');
-  $('#c_current').value=''; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.discTouched=false;
+  $('#c_current').value=''; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.pay='contado'; st.discTouched=false;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v==='tibio'));
   applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15';
   ls.set('og_draft', null); renderPick();
@@ -935,7 +982,7 @@ function renderLeads(){
   $('#leadList').innerHTML = list.length ? list.map(x => `<button class="lead" type="button" data-id="${esc(x.id)}">
       <span class="dot ${esc(x.interest)}" title="${esc(INTEREST[x.interest]||'')}"></span>
       <span class="who">${esc(x.name)}${x.company ? ' · <span style="font-weight:400">'+esc(x.company)+'</span>' : ''}</span>
-      <span class="amt">${x.total ? money(x.total, x.currency) : '—'}</span>
+      <span class="amt">${x.total ? money(x.totalToPay || x.total, x.currency) : '—'}</span>
       <span class="meta"><span class="pill ${x._local ? 'local' : esc(x.status)}">${x._local ? 'sin subir' : esc(STATUS[x.status]||x.status)}</span>${x.reserve && x.status !== 'perdida' ? '<span class="pill res">reservado</span>' : ''}<span>${esc(x.number)}</span><span>${esc(fmtDate(x.createdAt))}</span>${x.city||x.province ? `<span>${esc([x.city,x.province].filter(Boolean).join(', '))}</span>`:''}${x.seller ? `<span>${esc(x.seller)}</span>`:''}</span>
     </button>`).join('')
     : `<div class="empty">${all.length ? 'Nada coincide con el filtro.' : 'Todavía no hay contactos. La primera cotización que guardes aparece acá.'}</div>`;
