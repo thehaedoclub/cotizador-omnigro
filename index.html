@@ -480,7 +480,7 @@ function fmtUsd(n){ return Number(n).toLocaleString('es-AR', {minimumFractionDig
 function usdRateLine(){
   const r = Number(st.settings.usdRate);
   if(!r || !st.catalog.some(p => p.usdPrice)) return '';
-  return `Dólar ${st.settings.usdRateSource === 'manual' ? '(manual)' : 'blue'}: $${r.toLocaleString('es-AR')}${st.settings.usdRateDate ? ' · ' + String(st.settings.usdRateDate).split(' (')[0] : ''}`;
+  return `Dólar ${st.settings.usdRateSource === 'manual' ? '(manual)' : 'oficial'}: $${r.toLocaleString('es-AR')}${st.settings.usdRateDate ? ' · ' + String(st.settings.usdRateDate).split(' (')[0] : ''}`;
 }
 
 /* ---------- descuentos encadenados y cuotas ---------- */
@@ -573,7 +573,7 @@ function buildMessage(q){
   out.push(`Validez: ${q.validityDays} días.`);
   if(s.terms) out.push(s.terms);
   const usdItem = (q.items||[]).find(l => l.usdPrice && l.usdRate);
-  if(usdItem) out.push(`Valores en pesos al dólar blue de hoy ($${Number(usdItem.usdRate).toLocaleString('es-AR')}).`);
+  if(usdItem) out.push(`Valores en pesos al dólar oficial de hoy ($${Number(usdItem.usdRate).toLocaleString('es-AR')}).`);
   const specs = specGroups(q.items||[]);
   if(specs.length){ out.push(''); specs.forEach(g => out.push(`📄 Ficha técnica${specs.length > 1 ? ' ' + g.names.join(', ') : ''}: ${g.url}`)); }
   out.push('');
