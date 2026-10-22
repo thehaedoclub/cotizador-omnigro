@@ -609,7 +609,8 @@ function openSpecs(who){
       <label class="f">Nombre<input id="sp_name" value="${esc(who.name||'')}" autocomplete="off"></label>
       <label class="f">WhatsApp<input id="sp_phone" inputmode="tel" value="${esc(who.phone||'')}" autocomplete="off" placeholder="11 2345 6789"></label>
     </div>
-    <div class="chips" id="sp_list">${prods.map(x => `<label><input type="checkbox" value="${esc(x.id)}"${!pre.size || pre.has(x.name) ? ' checked' : ''}>${esc(x.name)}</label>`).join('')}</div>
+    <div class="actions"><button class="btn small" type="button" data-all="1">Marcar todas</button><button class="btn small" type="button" data-all="0">Ninguna</button></div>
+    <div class="chips" id="sp_list">${prods.map(x => `<label><input type="checkbox" value="${esc(x.id)}"${pre.has(x.name) ? ' checked' : ''}>${esc(x.name)}</label>`).join('')}</div>
     <div id="sp_out"></div>
     <button class="btn ghost" type="button" data-close>Cerrar</button>`);
   const build = () => {
@@ -617,16 +618,18 @@ function openSpecs(who){
     const items = prods.filter(x => ids.includes(x.id)).map(x => ({name:x.name, specUrl:x.specUrl}));
     const name = p.querySelector('#sp_name').value.trim(), phone = p.querySelector('#sp_phone').value.trim();
     const out = p.querySelector('#sp_out');
-    if(!items.length){ out.innerHTML = '<p class="note">Elegí al menos un equipo.</p>'; return; }
+    if(!items.length){ out.innerHTML = '<p class="note">Marcá las fichas que le interesan al cliente.</p>'; return; }
     const groups = specGroups(items), seller = ls.get('og_seller','');
     const lines = [`¡Hola${name ? ' ' + name.split(' ')[0] : ''}! Te paso ${groups.length > 1 ? 'las fichas técnicas' : 'la ficha técnica'} de Omnigro:`, ''];
     groups.forEach(g => { lines.push(`📄 ${g.names.join(', ')}`); lines.push(g.url); lines.push(''); });
     lines.push('Cualquier duda te asesoramos según el tamaño de tu sala.');
-    lines.push(`${seller ? seller + ' · ' : ''}Omnigro${st.settings.web ? ' · ' + st.settings.web : ''}`);
+    lines.push(`${seller ? seller + ' · ' : ''}Omnigro${st.settings.brandPhone ? ' · ' + st.settings.brandPhone : ''}${st.settings.web ? ' · ' + st.settings.web : ''}`);
     const text = lines.join('\n'), q = {id:'', phone, phoneWa:waNumber(phone), status:'x'};
     out.innerHTML = waBlock(q, text, 'Enviar por WhatsApp');
     out.querySelector('[data-copy]').addEventListener('click', () => copy(text));
   };
+  p.querySelectorAll('[data-all]').forEach(b => b.addEventListener('click', () => {
+    p.querySelectorAll('#sp_list input').forEach(i => i.checked = b.dataset.all === '1'); build(); }));
   p.addEventListener('input', build); p.addEventListener('change', build); build();
 }
 function followUpMessage(q){
