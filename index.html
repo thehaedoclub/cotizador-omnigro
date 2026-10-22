@@ -32,6 +32,11 @@
   --hot:#ff6b6b; --warm:#f0a540; --cold:#7fa8e6; --ok:#5fc489; --ok-soft:#173225; color-scheme:dark}
 
 *{box-sizing:border-box}
+.stockchip{font-family:var(--f-mono);font-size:11.5px;border-radius:99px;padding:1px 8px;background:var(--ok-soft);color:var(--ok)}
+.stockchip.low{background:var(--accent-soft);color:var(--amber)}
+.stockchip.out{background:var(--surface-2);color:var(--hot)}
+.pill.res{background:var(--ok-soft);color:var(--ok)}
+.warnline{color:var(--hot);font-size:13px}
 /* Reset que en Claude venía incluido: sin [hidden] las pestañas y avisos ocultos se seguirían viendo. */
 [hidden]{display:none!important}
 html{color-scheme:light dark;-webkit-text-size-adjust:100%}
@@ -219,6 +224,8 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
       <label class="f">Descuento expo (%)<input id="q_disc" type="number" inputmode="decimal" min="0" max="100" step="1"></label>
       <label class="f">Validez (días)<input id="q_valid" type="number" inputmode="numeric" min="1" step="1"></label>
     </div>
+    <label class="check" id="reserveRow" hidden><input type="checkbox" id="q_reserve" checked><span>Reservar estas unidades del stock de la expo (se bloquean para el resto del equipo)</span></label>
+    <div class="warnline" id="stockWarn" hidden></div>
     <label class="f">Notas internas (no van al cliente)<textarea id="q_notes" placeholder="Lo que charlaron, carpa, plazos, forma de pago…"></textarea></label>
     <div class="totals" id="totals"></div>
     <div class="actions">
@@ -367,11 +374,48 @@ document.querySelector('#v-nueva').addEventListener('change', saveDraft);
 /* ---------- catalog picker ---------- */
 function activeCatalog(){ return st.catalog.filter(p => p.active !== false).sort((a,b) => (a.order??99)-(b.order??99) || String(a.name).localeCompare(b.name)); }
 function qtyOf(key){ const l = st.cart.find(x => x.key===key); return l ? l.qty : 0; }
+/* ---------- stock de la expo ---------- */
+// Disponible = lo que informa la planilla menos lo reservado en este teléfono que todavía no se subió.
+function hasStock(p){ return p && p.stock != null && p.stock !== ''; }
+function localReserved(id){
+  const inSheet = new Set(st.contacts.map(q => q.id));
+  return st.pending.filter(x => !inSheet.has(x.id) && x.data.reserve && x.data.status !== 'perdida')
+    .reduce((n, x) => n + (x.data.items || []).filter(l => l.id === id).reduce((a, l) => a + (Number(l.qty) || 0), 0), 0);
+}
+function availableOf(p){
+  if(!hasStock(p)) return null;
+  const base = p.available != null ? Number(p.available) : Number(p.stock);
+  return base - localReserved(p.id);
+}
+function reserving(){ return !$('#reserveRow').hidden && $('#q_reserve').checked; }
+function stockChip(p){
+  const a = availableOf(p); if(a == null) return '';
+  const cls = a <= 0 ? 'out' : (a <= 2 ? 'low' : '');
+  return `<span class="stockchip ${cls}">${a <= 0 ? 'Sin stock' : 'Quedan ' + a + ' de ' + p.stock}</span>`;
+}
+function applyStock(cat){
+  if(!Array.isArray(cat) || !cat.length) return;
+  st.catalog = cat; ls.set('og_catalog', st.catalog); renderPick(); renderCatalog();
+}
+function cartShortages(){
+  return st.cart.map(l => { const p = st.catalog.find(x => x.id === l.key); const a = availableOf(p);
+    return a != null && l.qty > a ? `${l.name}: quedan ${Math.max(0, a)}` : ''; }).filter(Boolean);
+}
+$('#q_reserve').addEventListener('change', renderSummary);
+
 function setQty(p, q){
-  q = Math.max(0, q|0); const i = st.cart.findIndex(x => x.key === p.id);
+  q = Math.max(0, q|0);
+  const a = availableOf(p);
+  if(reserving() && a != null && q > qtyOf(p.id) && q > a){
+    toast(a <= 0 ? `${p.name}: no queda stock en la expo` : `${p.name}: solo quedan ${a}`);
+    q = Math.max(qtyOf(p.id), Math.min(q, Math.max(0, a)));
+    if(q === qtyOf(p.id)) return;
+  }
+  const i = st.cart.findIndex(x => x.key === p.id);
   if(q === 0){ if(i>=0) st.cart.splice(i,1); }
   else if(i>=0) st.cart[i].qty = q;
-  else st.cart.push({key:p.id, sku:p.sku||'', name:p.name, price:Number(p.price)||0, qty:q, specUrl:p.specUrl||''});
+  else st.cart.push({key:p.id, sku:p.sku||'', name:p.name, price:Number(p.price)||0, qty:q, specUrl:p.specUrl||'',
+    listPrice:Number(p.listPrice)||0, d1:Number(p.d1)||0, d2:Number(p.d2)||0});
   renderPick(); saveDraft();
 }
 function renderPick(){
@@ -381,7 +425,7 @@ function renderPick(){
     const cov = Number(p.coverage); const sug = area > 0 && cov > 0 ? Math.ceil(area / cov) : 0;
     const spec = [p.watts ? p.watts+' W' : '', p.ppf ? p.ppf+' µmol/s' : '', cov ? 'cubre '+cov+' m²' : ''].filter(Boolean).map(s=>`<span>${esc(s)}</span>`).join('');
     return `<div class="prod">
-      <div style="min-width:0"><div class="name">${esc(p.name)}</div><div class="spec">${spec}<span class="price">${money(p.price)}</span></div>
+      <div style="min-width:0"><div class="name">${esc(p.name)} ${stockChip(p)}</div><div class="spec">${spec}<span class="price">${money(p.price)}</span></div>
       ${sug ? `<button class="suggest" type="button" data-sug="${esc(p.id)}" data-n="${sug}">Para ${area} m² → ${sug} u.</button>` : ''}</div>
       <div class="step"><button type="button" aria-label="Quitar uno" data-dec="${esc(p.id)}">−</button><output>${qtyOf(p.id)}</output><button type="button" aria-label="Agregar uno" data-inc="${esc(p.id)}">+</button></div>
     </div>`; }).join('');
@@ -402,6 +446,20 @@ $('#x_add').addEventListener('click', () => {
   renderSummary(); saveDraft();
 });
 
+/* ---------- descuentos encadenados y cuotas ---------- */
+// "−20% −10%": el segundo descuento se aplica sobre el precio ya rebajado (no es 30%).
+function discText(l){ return [l.d1, l.d2].filter(d => Number(d) > 0).map(d => '−' + d + '%').join(' '); }
+function hasDisc(l){ return Number(l.listPrice) > Number(l.price) && discText(l); }
+function plans(total){
+  const s3 = Number(st.settings.surcharge3 ?? 10), s6 = Number(st.settings.surcharge6 ?? 20);
+  const t3 = Math.round(total * (1 + s3/100)), t6 = Math.round(total * (1 + s6/100));
+  return {s3, s6, t3, t6, c3: Math.round(t3/3), c6: Math.round(t6/6)};
+}
+function plansOf(q){
+  if(q.total3 && q.total6) return {s3:q.surcharge3, s6:q.surcharge6, t3:q.total3, t6:q.total6, c3:Math.round(q.total3/3), c6:Math.round(q.total6/6)};
+  return plans(q.total);
+}
+
 function calc(){
   const disc = Math.min(100, Math.max(0, parseFloat($('#q_disc').value) || 0));
   const subtotal = st.cart.reduce((s,l) => s + l.price*l.qty, 0);
@@ -410,11 +468,17 @@ function calc(){
 }
 function renderSummary(){
   const c = calc();
-  $('#lines').innerHTML = st.cart.length ? st.cart.map((l,i) => `<div><span>${l.qty} × ${esc(l.name)}${l.key.startsWith('x') ? ` <button class="suggest" type="button" data-rm="${i}">quitar</button>`:''}</span><span>${money(l.price*l.qty)}</span></div>`).join('')
+  $('#lines').innerHTML = st.cart.length ? st.cart.map((l,i) => `<div><span>${l.qty} × ${esc(l.name)}${hasDisc(l) ? ` <span class="note">(lista ${money(l.listPrice)} ${discText(l)})</span>` : ''}${l.key.startsWith('x') ? ` <button class="suggest" type="button" data-rm="${i}">quitar</button>`:''}</span><span>${money(l.price*l.qty)}</span></div>`).join('')
     : `<div class="note">Sin equipos todavía. Sumalos con los botones + de arriba.</div>`;
   $('#totals').innerHTML = `<div><span>Subtotal</span><span>${money(c.subtotal)}</span></div>`
     + (c.disc ? `<div><span>Descuento expo ${c.disc}%</span><span>−${money(c.discount)}</span></div>` : '')
-    + `<div class="grand"><span>Total</span><span>${money(c.total)}</span></div>`;
+    + `<div class="grand"><span>Total contado</span><span>${money(c.total)}</span></div>`
+    + (c.total ? (pl => `<div><span>3 cuotas (+${pl.s3}%)</span><span>3 × ${money(pl.c3)} = ${money(pl.t3)}</span></div><div><span>6 cuotas (+${pl.s6}%)</span><span>6 × ${money(pl.c6)} = ${money(pl.t6)}</span></div>`)(plans(c.total)) : '');
+  const controlled = st.cart.some(l => hasStock(st.catalog.find(x => x.id === l.key)));
+  $('#reserveRow').hidden = !controlled;
+  const short = controlled && reserving() ? cartShortages() : [];
+  $('#stockWarn').hidden = !short.length;
+  $('#stockWarn').textContent = short.length ? 'No alcanza el stock para reservar: ' + short.join(' · ') + '. Bajá cantidades o destildá la reserva.' : '';
 }
 $('#lines').addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if(!b) return; st.cart.splice(+b.dataset.rm,1); renderPick(); saveDraft(); });
 
@@ -426,10 +490,16 @@ function buildMessage(q){
   out.push('');
   out.push((s.greeting||'').replace(/\{nombre\}/g, (q.name||'').split(' ')[0]));
   out.push('');
-  q.items.forEach(l => out.push(`• ${l.qty} × ${l.name} — ${money(l.price,cur)} c/u = *${money(l.price*l.qty,cur)}*`));
+  q.items.forEach(l => out.push(hasDisc(l)
+    ? `• ${l.qty} × ${l.name}: lista ${money(l.listPrice,cur)} ${discText(l)} = ${money(l.price,cur)} c/u → *${money(l.price*l.qty,cur)}*`
+    : `• ${l.qty} × ${l.name} — ${money(l.price,cur)} c/u = *${money(l.price*l.qty,cur)}*`));
   out.push('');
   if(q.discountPct){ out.push(`Subtotal: ${money(q.subtotal,cur)}`); out.push(`Descuento Expo (${q.discountPct}%): −${money(q.discount,cur)}`); }
-  out.push(`*TOTAL: ${money(q.total,cur)}*`);
+  out.push(`*TOTAL CONTADO: ${money(q.total,cur)}*`);
+  if(q.total){ const pl = plansOf(q);
+    out.push(`💳 3 cuotas de ${money(pl.c3,cur)} (total ${money(pl.t3,cur)}, +${pl.s3}%)`);
+    out.push(`💳 6 cuotas de ${money(pl.c6,cur)} (total ${money(pl.t6,cur)}, +${pl.s6}%)`); }
+  if(q.reserve && !st.pending.some(x => x.id === q.id)) out.push('✅ Te reservamos estas unidades del stock de la expo.');
   if(isDriveUrl(q.pdfUrl)){ out.push(''); out.push(`📎 Cotización en PDF: ${q.pdfUrl}`); }
   out.push('');
   out.push(`Validez: ${q.validityDays} días.`);
@@ -548,6 +618,7 @@ async function quoteCanvas(q, noLogo){
     x.font = `500 26px ${B}`; lines.forEach((ln,i) => x.fillText(ln, cName, y + i*34));
     x.textAlign='right'; x.font = `400 24px ${M}`; x.fillStyle = muted; x.fillText(money(l.price,cur), cUnit, y);
     x.fillStyle = ink; x.font = `500 24px ${M}`; x.fillText(money(l.price*l.qty,cur), cSub-14, y); x.textAlign='left';
+    if(hasDisc(l)){ x.fillStyle = accent; x.font = `400 20px ${B}`; x.fillText(`Lista ${money(l.listPrice,cur)}  ${discText(l)}`, cName, y + lines.length*34); y += 30; }
     y += lines.length*34 + 18; rule(y); y += 40;
   });
 
@@ -560,7 +631,11 @@ async function quoteCanvas(q, noLogo){
     tl('Subtotal', money(q.subtotal,cur), `400 24px ${B}`, muted); y += 40;
     tl(`Descuento Expo ${q.discountPct}%`, '−' + money(q.discount,cur), `400 24px ${B}`, accent); y += 56;
   }
-  tl('TOTAL', money(q.total,cur), `800 44px ${D}`, ink); x.textAlign='left'; y += 70;
+  tl('TOTAL CONTADO', money(q.total,cur), `800 40px ${D}`, ink); y += 56;
+  if(q.total){ const pl = plansOf(q);
+    tl(`3 cuotas de ${money(pl.c3,cur)} (+${pl.s3}%)`, money(pl.t3,cur), `400 24px ${B}`, muted); y += 38;
+    tl(`6 cuotas de ${money(pl.c6,cur)} (+${pl.s6}%)`, money(pl.t6,cur), `400 24px ${B}`, muted); y += 20; }
+  x.textAlign='left'; y += 50;
 
   // condiciones
   if(s.terms){ rule(y); y += 46; x.fillStyle=muted; x.font=`600 18px ${M}`; x.fillText('CONDICIONES', P, y); y += 36;
@@ -643,7 +718,9 @@ async function pdfBase64For(q){
 }
 async function upload(q){
   const saved = await api('saveQuote', pin(), q, await pdfBase64For(q));
+  const stock = saved && saved.stock; if(stock) delete saved.stock;
   st.contacts = [saved].concat(st.contacts.filter(x => x.id !== saved.id)); cacheContacts();
+  if(stock) applyStock(stock);
   return saved;
 }
 function queue(q){
@@ -684,10 +761,13 @@ function collect(leadOnly){
     clientType: $('#c_type').value, areaM2: parseFloat($('#c_area').value) || null,
     currentLighting: $('#c_current').value, source: $('#c_source').value,
     interest: st.interest, consent: $('#c_consent').checked,
-    items: leadOnly ? [] : st.cart.map(l => ({sku:l.sku, name:l.name, price:l.price, qty:l.qty, specUrl:l.specUrl || specOf(l.key)})),
+    items: leadOnly ? [] : st.cart.map(l => ({id: l.key.startsWith('x') ? '' : l.key, sku:l.sku, name:l.name, price:l.price, qty:l.qty, specUrl:l.specUrl || specOf(l.key),
+      listPrice:l.listPrice||0, d1:l.d1||0, d2:l.d2||0})),
+    reserve: !leadOnly && reserving(),
     currency: st.settings.currency,
     discountPct: leadOnly ? 0 : c.disc, subtotal: leadOnly ? 0 : c.subtotal, discount: leadOnly ? 0 : c.discount, total: leadOnly ? 0 : c.total,
     validityDays: parseInt($('#q_valid').value) || st.settings.validityDays,
+    ...(leadOnly ? {} : (pl => ({surcharge3: pl.s3, surcharge6: pl.s6, total3: pl.t3, total6: pl.t6}))(plans(c.total))),
     notes: $('#q_notes').value.trim(),
     status: 'nueva', kind: leadOnly ? 'contacto' : 'cotizacion', event: st.settings.event || 'Expo Cannabis 2026'
   };
@@ -696,6 +776,7 @@ async function save(leadOnly){
   const name = $('#c_name').value.trim();
   if(!name){ toast('Falta el nombre del cliente'); $('#c_name').focus(); return; }
   if(!leadOnly && !st.cart.length){ toast('Agregá al menos un equipo, o usá "Solo guardar contacto"'); return; }
+  if(!leadOnly && reserving() && cartShortages().length){ toast('No alcanza el stock para reservar. Bajá cantidades o destildá la reserva.'); return; }
   if(!pin()){ askPin(); return; }
   const q = collect(leadOnly);
   queue(q); // primero queda en el teléfono: si la señal falla, no se pierde
@@ -714,7 +795,7 @@ $('#leadOnlyBtn').addEventListener('click', () => save(true));
 $('#clearBtn').addEventListener('click', () => { resetForm(); toast('Formulario limpio'); });
 function resetForm(){
   ['c_name','c_company','c_phone','c_email','c_city','c_area','q_notes','x_name','x_price'].forEach(f => $('#'+f).value='');
-  $('#c_current').value=''; $('#c_consent').checked = true; st.cart = []; st.interest='tibio'; st.discTouched=false;
+  $('#c_current').value=''; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.discTouched=false;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v==='tibio'));
   applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15';
   ls.set('og_draft', null); renderPick();
@@ -772,6 +853,9 @@ function fillDone(p, q, synced){
     : synced === 'lenta'
       ? 'La señal está lenta. Ya quedó guardada en este teléfono y se sigue subiendo. Podés mandar el mensaje ahora (sin link al PDF) o esperar unos segundos acá: si se sube, el mensaje se actualiza con el link.'
       : 'Sin conexión: quedó en este teléfono y se sube sola. El mensaje sale sin link al PDF; adjuntá la imagen a mano.';
+  if(synced === true && q.reserveNote) p.querySelector('[data-status]').textContent += ' ⚠️ No se reservó: ' + q.reserveNote + '.';
+  else if(synced === true && q.reserve) p.querySelector('[data-status]').textContent += ' Unidades reservadas.';
+  else if(synced !== true && q.reserve) p.querySelector('[data-status]').textContent += ' La reserva se confirma cuando se sube.';
   const text = isLead ? leadText(q) : buildMessage(q);
   p.querySelector('[data-wa-area]').innerHTML = waBlock(q, text, 'Enviar por WhatsApp')
     + '<p class="note" style="margin:0">WhatsApp se abre con el mensaje listo; vos apretás enviar.</p>';
@@ -803,12 +887,17 @@ async function markSent(q){
 async function updateQuote(id, patch){
   const pend = st.pending.find(p => p.id === id);
   if(pend){ Object.assign(pend.data, patch); ls.set('og_pending', st.pending); renderAll(); return true; }
-  const send = {}; ['status','interest','notes'].forEach(k => { if(k in patch) send[k] = patch[k]; });
+  const send = {}; ['status','interest','notes','reserve'].forEach(k => { if(k in patch) send[k] = patch[k]; });
   if(!Object.keys(send).length) return true;
   try{
     const saved = await api('updateQuote', pin(), id, send);
+    if(saved && saved.stock){ applyStock(saved.stock); delete saved.stock; }
     st.contacts = st.contacts.map(x => x.id === id ? saved : x); cacheContacts(); renderAll(); return true;
-  }catch(e){ toast(isPinError(e) ? 'La clave no es correcta' : 'No se pudo guardar el cambio (¿sin conexión?)'); return false; }
+  }catch(e){
+    const msg = String((e && e.message) || e);
+    toast(isPinError(e) ? 'La clave no es correcta' : /STOCK_INSUFICIENTE/.test(msg) ? 'No alcanza el stock: ' + msg.split('STOCK_INSUFICIENTE:')[1].trim() : 'No se pudo guardar el cambio (¿sin conexión?)');
+    return false;
+  }
 }
 async function deleteQuote(q){
   if(st.pending.some(p => p.id === q.id)){
@@ -847,7 +936,7 @@ function renderLeads(){
       <span class="dot ${esc(x.interest)}" title="${esc(INTEREST[x.interest]||'')}"></span>
       <span class="who">${esc(x.name)}${x.company ? ' · <span style="font-weight:400">'+esc(x.company)+'</span>' : ''}</span>
       <span class="amt">${x.total ? money(x.total, x.currency) : '—'}</span>
-      <span class="meta"><span class="pill ${x._local ? 'local' : esc(x.status)}">${x._local ? 'sin subir' : esc(STATUS[x.status]||x.status)}</span><span>${esc(x.number)}</span><span>${esc(fmtDate(x.createdAt))}</span>${x.city||x.province ? `<span>${esc([x.city,x.province].filter(Boolean).join(', '))}</span>`:''}${x.seller ? `<span>${esc(x.seller)}</span>`:''}</span>
+      <span class="meta"><span class="pill ${x._local ? 'local' : esc(x.status)}">${x._local ? 'sin subir' : esc(STATUS[x.status]||x.status)}</span>${x.reserve && x.status !== 'perdida' ? '<span class="pill res">reservado</span>' : ''}<span>${esc(x.number)}</span><span>${esc(fmtDate(x.createdAt))}</span>${x.city||x.province ? `<span>${esc([x.city,x.province].filter(Boolean).join(', '))}</span>`:''}${x.seller ? `<span>${esc(x.seller)}</span>`:''}</span>
     </button>`).join('')
     : `<div class="empty">${all.length ? 'Nada coincide con el filtro.' : 'Todavía no hay contactos. La primera cotización que guardes aparece acá.'}</div>`;
   const b = $('#leadBadge'); b.hidden = !all.length; b.textContent = all.length;
@@ -871,6 +960,7 @@ function openLead(id){
       ${q.currentLighting ? `<dt>Ilum. actual</dt><dd>${esc(q.currentLighting)}</dd>`:''}
       <dt>Interés</dt><dd>${esc(INTEREST[q.interest]||'')}</dd>
       <dt>Consentimiento</dt><dd>${q.consent ? 'Sí' : 'No'}</dd>
+      ${(q.items||[]).length ? `<dt>Reserva</dt><dd>${q.reserve ? (q.status === 'perdida' ? 'Liberada (perdida)' : 'Sí, unidades bloqueadas') : 'No'}${q.reserveNote ? ' · ' + esc(q.reserveNote) : ''}</dd>` : ''}
       <dt>N°</dt><dd>${esc(q.number)} · ${esc(fmtDate(q.createdAt))}${q.seller ? ' · '+esc(q.seller):''}</dd>
     </dl>
     <div class="lines">${items}${q.total ? `<div style="font-weight:700"><span>Total${q.discountPct ? ' (−'+q.discountPct+'%)':''}</span><span>${money(q.total,q.currency)}</span></div>`:''}</div>
@@ -881,7 +971,8 @@ function openLead(id){
     <label class="f">Notas internas<textarea id="d_notes">${esc(q.notes)}</textarea></label>
     <button class="btn primary" type="button" id="d_save">Guardar cambios</button>
     <h2 style="font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Mensajes</h2>
-    <div class="actions"><button class="btn small" type="button" data-m="quote"${q.items?.length ? '' : ' disabled'}>Reenviar cotización</button><button class="btn small" type="button" data-m="follow">Seguimiento post-expo</button><button class="btn small" type="button" data-specs>Fichas técnicas</button></div>
+    <div class="actions"><button class="btn small" type="button" data-m="quote"${q.items?.length ? '' : ' disabled'}>Reenviar cotización</button><button class="btn small" type="button" data-m="follow">Seguimiento post-expo</button><button class="btn small" type="button" data-specs>Fichas técnicas</button>${(q.items||[]).length ? `<button class="btn small" type="button" id="d_res">${q.reserve ? 'Liberar reserva' : 'Reservar stock'}</button>` : ''}</div>
+    <p class="note" style="margin:0">Al pasar la cotización a "Perdida" o borrarla, sus unidades vuelven al stock.</p>
     <div id="d_msg"></div>
     ${docBlock(q)}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button><button class="btn danger" type="button" id="d_del">Borrar contacto</button></div>`);
@@ -893,6 +984,11 @@ function openLead(id){
     if(await deleteQuote(q)){ toast('Contacto borrado'); closeSheet(); } else del.disabled = false;
   });
   p.querySelector('[data-specs]').addEventListener('click', () => openSpecs(q));
+  p.querySelector('#d_res')?.addEventListener('click', async () => {
+    const b = p.querySelector('#d_res'); b.disabled = true;
+    const ok = await updateQuote(q.id, {reserve: !q.reserve});
+    if(ok){ toast(q.reserve ? 'Reserva liberada' : 'Unidades reservadas'); closeSheet(); } else b.disabled = false;
+  });
   p.querySelector('#d_save').addEventListener('click', async () => {
     const ok = await updateQuote(q.id, {status:$('#d_status').value, interest:$('#d_interest').value, notes:$('#d_notes').value.trim()});
     if(ok){ toast('Cambios guardados'); closeSheet(); }
@@ -911,7 +1007,7 @@ function renderCatalog(){
   const list = [...st.catalog].sort((a,b) => (a.order??99)-(b.order??99) || String(a.name).localeCompare(b.name));
   $('#catList').innerHTML = list.length ? list.map(p => `<div class="prod">
       <div style="min-width:0"><div class="name">${esc(p.name)}${p.active === false ? ' <span class="pill">oculto</span>':''}</div>
-      <div class="spec">${p.sku?`<span>${esc(p.sku)}</span>`:''}${p.watts?`<span>${esc(p.watts)} W</span>`:''}${p.ppf?`<span>${esc(p.ppf)} µmol/s</span>`:''}${p.coverage?`<span>${esc(p.coverage)} m²</span>`:''}${p.specUrl?'<span>con ficha</span>':''}</div></div>
+      <div class="spec">${p.sku?`<span>${esc(p.sku)}</span>`:''}${p.watts?`<span>${esc(p.watts)} W</span>`:''}${p.ppf?`<span>${esc(p.ppf)} µmol/s</span>`:''}${p.coverage?`<span>${esc(p.coverage)} m²</span>`:''}${p.specUrl?'<span>con ficha</span>':''}${hasDisc(p)?`<span>lista ${money(p.listPrice)} ${discText(p)}</span>`:''}</div>${hasStock(p) ? `<div class="spec"><span>Stock expo ${esc(p.stock)}</span><span>Reservado ${esc((p.reserved||0) + localReserved(p.id))}</span><span>Disponible ${esc(Math.max(0, availableOf(p)))}</span></div>` : ''}</div>
       <span class="price">${money(p.price)}</span></div>`).join('')
     : `<div class="empty">Sin productos. Cargalos en la pestaña Catálogo de la planilla.</div>`;
 }
@@ -934,7 +1030,7 @@ function renderSync(){
   if(n){ el.className='sync warn'; el.textContent = `${n} sin subir`; }
   else { el.className='sync ok'; el.textContent = 'sincronizado'; }
 }
-function renderAll(){ renderSync(); renderLeads(); renderCatalog(); }
+function renderAll(){ renderSync(); renderLeads(); renderCatalog(); renderPick(); }
 
 loadDraft(); applySettingsToForm(false); renderPick(); renderAll();
 showTab(ls.get('og_tab', 'v-nueva'));
