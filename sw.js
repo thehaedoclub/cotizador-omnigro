@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que abra sin internet.
 // Los pedidos a la planilla (script.google.com) nunca pasan por acá.
-const CACHE = 'omnigro-v16';
+const CACHE = 'omnigro-v17';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'];
 
