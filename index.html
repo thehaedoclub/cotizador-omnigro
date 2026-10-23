@@ -86,6 +86,12 @@ section.view{padding-block:18px 8px;display:flex;flex-direction:column;gap:18px}
 @media (max-width:480px){.row{grid-template-columns:1fr}}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--muted)}
 label.f .hint{font-weight:400;font-size:12px;font-family:var(--f-mono);color:var(--muted)}
+.area{display:flex;flex-direction:column;gap:6px}
+.area .hint{font-size:12px;font-family:var(--f-mono);color:var(--muted)}
+.area .hint:empty{display:none}
+.dims{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.dims span{flex:none}
+.dims input{min-width:0;padding:8px 9px}
 input,select,textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 11px;width:100%}
 textarea{min-height:70px;resize:vertical}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -201,7 +207,11 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
           <option>Autocultivador / REPROCANN</option><option>Club / ONG cannábica</option><option>Growshop / revendedor</option><option>Empresa / licenciatario</option><option>Cultivo hortícola / otro</option>
         </select>
       </label>
-      <label class="f">Superficie de cultivo (m²)<input id="c_area" type="text" inputmode="decimal" autocomplete="off" placeholder="ej: 2,88 o 1,22 x 2,44"><span class="hint" id="areaHint">m² con coma, o ancho x largo en metros</span></label>
+      <div class="area">
+        <label class="f">Superficie de cultivo (m²)<input id="c_area" type="text" inputmode="decimal" autocomplete="off" placeholder="ej: 2,88"></label>
+        <div class="dims"><span>o medidas</span><input id="c_w" type="text" inputmode="decimal" autocomplete="off" placeholder="ancho" aria-label="Ancho en metros"><span>×</span><input id="c_l" type="text" inputmode="decimal" autocomplete="off" placeholder="largo" aria-label="Largo en metros"><span>m</span></div>
+        <span class="hint" id="areaHint"></span>
+      </div>
     </div>
     <div class="row">
       <label class="f">Iluminación actual
@@ -388,16 +398,25 @@ function areaM2(t){
 const fmtM2 = n => n.toLocaleString('es-AR', {maximumFractionDigits: 2});
 $('#c_area').addEventListener('input', () => {
   const v = $('#c_area').value, a = areaM2(v);
-  $('#areaHint').textContent = /[x×*]/i.test(v) && a ? '= ' + fmtM2(a) + ' m²' : 'm² con coma, o ancho x largo en metros';
+  $('#areaHint').textContent = /[x×*]/i.test(v) && a ? '= ' + fmtM2(a) + ' m²' : '';
   renderPick();
 });
+// Ancho × largo (teclado numérico, sin la "x"): completa los m² solo.
+['#c_w', '#c_l'].forEach(s => $(s).addEventListener('input', () => {
+  const w = areaM2($('#c_w').value), l = areaM2($('#c_l').value);
+  if(!(w > 0 && l > 0)) return;
+  const a = w * l > 100 ? w * l / 10000 : w * l; // en cm (122 × 244) o en metros
+  $('#c_area').value = fmtM2(Math.round(a * 100) / 100).replace(/\./g, '');
+  $('#areaHint').textContent = fmtM2(w) + ' × ' + fmtM2(l) + ' = ' + fmtM2(a) + ' m²';
+  renderPick(); saveDraft();
+}));
 $('#q_disc').addEventListener('input', () => { st.discTouched = true; renderSummary(); });
 $('#q_valid').addEventListener('input', renderSummary);
 $('#s_seller').value = ls.get('og_seller', '');
 $('#s_seller').addEventListener('change', () => { ls.set('og_seller', $('#s_seller').value.trim()); toast('Nombre guardado en este teléfono'); });
 
 /* draft persistence so a reload mid-conversation doesn't lose data */
-const DRAFT_FIELDS = ['c_name','c_company','c_phone','c_email','c_city','c_province','c_type','c_area','c_current','c_source','q_notes','q_disc','q_valid'];
+const DRAFT_FIELDS = ['c_name','c_company','c_phone','c_email','c_city','c_province','c_type','c_area','c_w','c_l','c_current','c_source','q_notes','q_disc','q_valid'];
 function saveDraft(){ const d = {cart:st.cart, interest:st.interest, pay:st.pay, consent:$('#c_consent').checked};
   DRAFT_FIELDS.forEach(f => d[f] = $('#'+f).value); ls.set('og_draft', d); }
 function loadDraft(){ const d = ls.get('og_draft', null); if(!d) return;
@@ -900,10 +919,10 @@ $('#saveBtn').addEventListener('click', () => save(false));
 $('#leadOnlyBtn').addEventListener('click', () => save(true));
 $('#clearBtn').addEventListener('click', () => { resetForm(); toast('Formulario limpio'); });
 function resetForm(){
-  ['c_name','c_company','c_phone','c_email','c_city','c_area','q_notes','x_name','x_price'].forEach(f => $('#'+f).value='');
+  ['c_name','c_company','c_phone','c_email','c_city','c_area','c_w','c_l','q_notes','x_name','x_price'].forEach(f => $('#'+f).value='');
   $('#c_current').value=''; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.pay='contado'; st.discTouched=false;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v==='tibio'));
-  applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15'; $('#areaHint').textContent = 'm² con coma, o ancho x largo en metros';
+  applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15'; $('#areaHint').textContent = '';
   ls.set('og_draft', null); renderPick();
 }
 
