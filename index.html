@@ -32,10 +32,12 @@
   --hot:#ff6b6b; --warm:#f0a540; --cold:#7fa8e6; --ok:#5fc489; --ok-soft:#173225; color-scheme:dark}
 
 *{box-sizing:border-box}
-.stockchip{font-family:var(--f-mono);font-size:11.5px;border-radius:99px;padding:1px 8px;background:var(--ok-soft);color:var(--ok)}
-.stockchip.low{background:var(--accent-soft);color:var(--amber)}
-.stockchip.out{background:var(--surface-2);color:var(--hot)}
-.pill.res{background:var(--ok-soft);color:var(--ok)}
+.stockchip{display:inline-block;white-space:nowrap;font-family:var(--f-mono);font-size:11.5px;font-weight:700;border-radius:99px;padding:1px 8px;background:transparent;color:var(--hot);border:1px solid var(--hot)}
+.stockchip.out{background:var(--hot);color:#fff}
+.pill.res{background:transparent;color:var(--hot);font-weight:700;border:1px solid var(--hot)}
+.hot{color:var(--hot);font-weight:700}
+#reserveRow span{color:var(--hot);font-weight:700}
+.prod .spec.stockline{color:var(--hot);font-weight:700}
 .warnline{color:var(--hot);font-size:13px}
 .cathead{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);padding:14px 0 4px;border-top:1px solid var(--line)}
 .cathead:first-child{border-top:0;padding-top:0}
@@ -1085,7 +1087,7 @@ function openLead(id){
       ${q.currentLighting ? `<dt>Ilum. actual</dt><dd>${esc(q.currentLighting)}</dd>`:''}
       <dt>Interés</dt><dd>${esc(INTEREST[q.interest]||'')}</dd>
       <dt>Consentimiento</dt><dd>${q.consent ? 'Sí' : 'No'}</dd>
-      ${(q.items||[]).length ? `<dt>Reserva</dt><dd>${q.reserve ? (q.status === 'perdida' ? 'Liberada (perdida)' : 'Sí, unidades bloqueadas') : 'No'}${q.reserveNote ? ' · ' + esc(q.reserveNote) : ''}</dd>` : ''}
+      ${(q.items||[]).length ? `<dt>Reserva</dt><dd>${q.reserve ? (q.status === 'perdida' ? 'Liberada (perdida)' : '<b class="hot">Sí, unidades bloqueadas</b>') : 'No'}${q.reserveNote ? ' · ' + esc(q.reserveNote) : ''}</dd>` : ''}
       <dt>N°</dt><dd>${esc(q.number)} · ${esc(fmtDate(q.createdAt))}${q.seller ? ' · '+esc(q.seller):''}</dd>
     </dl>
     <div class="lines">${items}${q.total ? `<div style="font-weight:700"><span>Total contado${q.discountPct ? ' (−'+q.discountPct+'%)':''}</span><span>${money(q.total,q.currency)}</span></div>`:''}${q.total && payOf(q).pay !== 'contado' ? (pi => `<div><span>${esc(pi.label)} (+${pi.pct}%)</span><span>${money(pi.total,q.currency)} · ${pi.n} × ${money(pi.each,q.currency)}</span></div>`)(payOf(q)) : ''}</div>
@@ -1146,7 +1148,7 @@ function renderCatalog(){
   const list = [...st.catalog].sort((a,b) => (a.order??99)-(b.order??99) || String(a.name).localeCompare(b.name));
   $('#catList').innerHTML = list.length ? list.map(p => `<div class="prod">
       <div style="min-width:0"><div class="name">${esc(p.name)}${p.active === false ? ' <span class="pill">oculto</span>':''}${!(Number(p.price) > 0) ? ' <span class="pill">sin precio</span>':''}</div>
-      <div class="spec">${p.sku?`<span>${esc(p.sku)}</span>`:''}${p.watts?`<span>${esc(p.watts)} W</span>`:''}${p.ppf?`<span>${esc(p.ppf)} µmol/s</span>`:''}${p.coverageText?`<span>alcance ${esc(p.coverageText.replace(/x/g,'×'))} cm</span>`:''}${p.specUrl?'<span>con ficha</span>':''}${hasDisc(p)?`<span>lista ${money(p.listPrice)} ${discText(p)}</span>`:''}${p.usdPrice?`<span>USD ${fmtUsd(p.usdPrice)}</span>`:''}${p.category?`<span>${esc(p.category)}</span>`:''}</div>${hasStock(p) ? `<div class="spec"><span>Stock expo ${esc(p.stock)}</span><span>Reservado ${esc((p.reserved||0) + localReserved(p.id))}</span><span>Disponible ${esc(Math.max(0, availableOf(p)))}</span></div>` : ''}</div>
+      <div class="spec">${p.sku?`<span>${esc(p.sku)}</span>`:''}${p.watts?`<span>${esc(p.watts)} W</span>`:''}${p.ppf?`<span>${esc(p.ppf)} µmol/s</span>`:''}${p.coverageText?`<span>alcance ${esc(p.coverageText.replace(/x/g,'×'))} cm</span>`:''}${p.specUrl?'<span>con ficha</span>':''}${hasDisc(p)?`<span>lista ${money(p.listPrice)} ${discText(p)}</span>`:''}${p.usdPrice?`<span>USD ${fmtUsd(p.usdPrice)}</span>`:''}${p.category?`<span>${esc(p.category)}</span>`:''}</div>${hasStock(p) ? `<div class="spec stockline"><span>Stock expo ${esc(p.stock)}</span><span>Reservado ${esc((p.reserved||0) + localReserved(p.id))}</span><span>Disponible ${esc(Math.max(0, availableOf(p)))}</span></div>` : ''}</div>
       <span class="price">${money(p.price)}</span></div>`).join('')
     : `<div class="empty">Sin productos. Cargalos en la pestaña Catálogo de la planilla.</div>`;
 }
