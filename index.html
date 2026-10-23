@@ -126,6 +126,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .step{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .step button{width:38px;height:38px;border:0;background:var(--surface-2);color:var(--ink);font:700 18px var(--f-body);cursor:pointer}
 .step output{min-width:34px;text-align:center;font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-weight:500}
+.step input.qty{width:56px;height:38px;border:0;border-radius:0;padding:0 4px;text-align:center;font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-weight:600;background:var(--surface)}
 .suggest{font-family:var(--f-mono);font-size:11.5px;color:var(--amber);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-align:left}
 
 .totals{font-family:var(--f-mono);font-variant-numeric:tabular-nums;display:flex;flex-direction:column;gap:4px;font-size:14px}
@@ -170,6 +171,8 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
 .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .note{font-size:13px;color:var(--muted)}
 .banner{background:var(--accent-soft);color:var(--ink);border-radius:var(--r);padding:10px 14px;font-size:13.5px}
+.banner.edit{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--amber);color:#fff;font-weight:600}
+.banner.edit button{flex:none;border:1px solid #fff;background:transparent;color:#fff;border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer}
 .qimg{width:100%;max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;display:block}
 .toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;z-index:30;max-width:90%}
 @media (prefers-reduced-motion:no-preference){.sheet .panel{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
@@ -185,6 +188,7 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
 
 <!-- NUEVA COTIZACIÓN -->
 <section class="view" id="v-nueva">
+  <div class="banner edit" id="editBanner" hidden><span id="editText"></span><button type="button" id="editCancel">Cancelar</button></div>
   <div class="banner" id="localBanner" hidden>Sin conexión a la base. Las cotizaciones se guardan en este teléfono y se suben solas cuando vuelve la conexión.</div>
 
   <div class="block">
@@ -347,7 +351,7 @@ const st = {
   catalog: ls.get('og_catalog', []),
   settings: Object.assign({}, DEFAULTS, ls.get('og_settings', {})),
   contacts: ls.get('og_contacts', []), pending: ls.get('og_pending', []),
-  cart: [], interest:'tibio', pay:'contado', discTouched:false
+  cart: [], interest:'tibio', pay:'contado', discTouched:false, editing:null
 };
 
 /* ---------- helpers ---------- */
@@ -419,11 +423,12 @@ $('#s_seller').addEventListener('change', () => { ls.set('og_seller', $('#s_sell
 
 /* draft persistence so a reload mid-conversation doesn't lose data */
 const DRAFT_FIELDS = ['c_name','c_company','c_phone','c_email','c_city','c_province','c_type','c_area','c_w','c_l','c_current','c_source','q_notes','q_disc','q_valid'];
-function saveDraft(){ const d = {cart:st.cart, interest:st.interest, pay:st.pay, consent:$('#c_consent').checked};
+function saveDraft(){ const d = {cart:st.cart, interest:st.interest, pay:st.pay, consent:$('#c_consent').checked, editing:st.editing, reserve:$('#q_reserve').checked};
   DRAFT_FIELDS.forEach(f => d[f] = $('#'+f).value); ls.set('og_draft', d); }
 function loadDraft(){ const d = ls.get('og_draft', null); if(!d) return;
   DRAFT_FIELDS.forEach(f => { if(d[f] != null && d[f] !== '') $('#'+f).value = d[f]; });
   st.cart = Array.isArray(d.cart) ? d.cart : []; st.interest = d.interest || 'tibio'; st.pay = d.pay || 'contado'; $('#c_consent').checked = d.consent !== false;
+  st.editing = d.editing || null; if(d.reserve === false) $('#q_reserve').checked = false; renderEditBanner();
   if(d.q_disc !== '' && d.q_disc != null) st.discTouched = true;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v===st.interest));
   $('#c_phone').dispatchEvent(new Event('input')); $('#c_area').dispatchEvent(new Event('input')); }
@@ -444,7 +449,9 @@ function localReserved(id){
 function availableOf(p){
   if(!hasStock(p)) return null;
   const base = p.available != null ? Number(p.available) : Number(p.stock);
-  return base - localReserved(p.id);
+  // Al modificar una cotización con reserva, sus propias unidades vuelven a estar disponibles para ella.
+  const own = st.editing && st.editing.held ? Number(st.editing.held[p.id]) || 0 : 0;
+  return base - localReserved(p.id) + own;
 }
 function reserving(){ return !$('#reserveRow').hidden && $('#q_reserve').checked; }
 function stockChip(p){
@@ -500,7 +507,7 @@ function renderPick(){
     return head + `<div class="prod">
       <div style="min-width:0"><div class="name">${esc(p.name)} ${stockChip(p)}</div><div class="spec">${spec}<span class="price">${money(p.price)}</span></div>
       ${sug ? `<button class="suggest" type="button" data-sug="${esc(p.id)}" data-n="${sug}">Para ${fmtM2(area)} m² → ${sug} u.</button>` : ''}</div>
-      <div class="step"><button type="button" aria-label="Quitar uno" data-dec="${esc(p.id)}">−</button><output>${qtyOf(p.id)}</output><button type="button" aria-label="Agregar uno" data-inc="${esc(p.id)}">+</button></div>
+      <div class="step"><button type="button" aria-label="Quitar uno" data-dec="${esc(p.id)}">−</button><input class="qty" type="text" inputmode="numeric" autocomplete="off" aria-label="Cantidad de ${esc(p.name)}" data-qty="${esc(p.id)}" value="${qtyOf(p.id)}"><button type="button" aria-label="Agregar uno" data-inc="${esc(p.id)}">+</button></div>
     </div>`; }).join('');
   renderSummary();
 }
@@ -511,6 +518,14 @@ $('#pickList').addEventListener('click', e => {
   else if(b.dataset.dec) setQty(p, qtyOf(id)-1);
   else setQty(p, +b.dataset.n);
 });
+// Cantidad escrita a mano (ej: 137): se aplica al salir del campo o con Enter.
+$('#pickList').addEventListener('change', e => {
+  const i = e.target.closest('[data-qty]'); if(!i) return;
+  const p = st.catalog.find(x => x.id === i.dataset.qty); if(!p) return;
+  setQty(p, parseInt(String(i.value).replace(/\D/g, ''), 10) || 0);
+});
+$('#pickList').addEventListener('focusin', e => { const i = e.target.closest('[data-qty]'); if(i) setTimeout(() => i.select(), 0); });
+$('#pickList').addEventListener('keydown', e => { const i = e.target.closest('[data-qty]'); if(i && e.key === 'Enter'){ e.preventDefault(); i.blur(); } });
 $('#specBtn').addEventListener('click', () => openSpecs({name:$('#c_name').value.trim(), phone:$('#c_phone').value.trim(), items:st.cart}));
 $('#x_add').addEventListener('click', () => {
   const name = $('#x_name').value.trim(); const price = parseFloat($('#x_price').value);
@@ -590,7 +605,7 @@ $('#lines').addEventListener('click', e => { const b = e.target.closest('[data-r
 function buildMessage(q){
   const s = st.settings, cur = q.currency;
   const out = [];
-  out.push(`*Cotización Omnigro* · N° ${q.number}`);
+  out.push(`*Cotización Omnigro* · N° ${q.number}${q.edit ? ' (actualizada)' : ''}`);
   out.push('');
   out.push((s.greeting||'').replace(/\{nombre\}/g, (q.name||'').split(' ')[0]));
   out.push('');
@@ -826,7 +841,7 @@ async function refresh(){
     st.contacts = r.contacts || []; cacheContacts();
     st.sheetUrl = r.sheetUrl || ''; ls.set('og_sheet', st.sheetUrl);
     const inSheet = new Set(st.contacts.map(q => q.id)), before = st.pending.length;
-    st.pending = st.pending.filter(p => !inSheet.has(p.id));
+    st.pending = st.pending.filter(p => !inSheet.has(p.id) || p.data.edit);
     if(st.pending.length !== before) ls.set('og_pending', st.pending);
     st.online = true; applySettingsToForm(false); renderPick(); renderAll();
     return true;
@@ -877,10 +892,10 @@ setInterval(() => { if(document.visibilityState === 'visible') refresh(); }, 600
 
 /* ---------- guardar ---------- */
 function collect(leadOnly){
-  const c = calc(); const now = new Date().toISOString(); const number = quoteNumber();
+  const c = calc(); const now = new Date().toISOString(); const number = quoteNumber(); const ed = st.editing;
   return {
-    id: number, number, createdAt: now, updatedAt: now,
-    seller: ls.get('og_seller','') || '',
+    id: ed ? ed.id : number, number: ed ? ed.number : number, createdAt: ed ? ed.createdAt : now, updatedAt: now,
+    seller: (ed && ed.seller) || ls.get('og_seller','') || '', ...(ed ? {edit: true} : {}),
     name: $('#c_name').value.trim(), company: $('#c_company').value.trim(),
     phone: $('#c_phone').value.trim(), phoneWa: waNumber($('#c_phone').value),
     email: $('#c_email').value.trim(), city: $('#c_city').value.trim(), province: $('#c_province').value,
@@ -896,7 +911,7 @@ function collect(leadOnly){
     ...(leadOnly ? {} : (pl => ({surcharge3: pl.s3, surcharge6: pl.s6, total3: pl.t3, total6: pl.t6,
       payment: payInfo(c.total, st.pay, pl).label, totalToPay: payInfo(c.total, st.pay, pl).total}))(plans(c.total))),
     notes: $('#q_notes').value.trim(),
-    status: 'nueva', kind: leadOnly ? 'contacto' : 'cotizacion', event: st.settings.event || 'Expo Cannabis 2026'
+    status: (ed && ed.status) || 'nueva', kind: leadOnly ? 'contacto' : 'cotizacion', event: st.settings.event || 'Expo Cannabis 2026'
   };
 }
 async function save(leadOnly){
@@ -925,8 +940,45 @@ function resetForm(){
   $('#c_current').value=''; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.pay='contado'; st.discTouched=false;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v==='tibio'));
   applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15'; $('#areaHint').textContent = '';
+  st.editing = null; renderEditBanner();
   ls.set('og_draft', null); renderPick();
 }
+
+/* ---------- modificar una cotización ya guardada ---------- */
+// Carga la cotización en el formulario de Cotizar. Al guardar se reemplaza la misma (mismo número) y se rehace el PDF.
+function startEdit(q){
+  resetForm();
+  const held = {};
+  const srv = st.contacts.find(c => c.id === q.id); // lo que la planilla ya tiene reservado para esta cotización
+  if(srv && srv.reserve && srv.status !== 'perdida') (srv.items||[]).forEach(l => { if(l.id) held[l.id] = (held[l.id]||0) + (Number(l.qty)||0); });
+  st.editing = {id:q.id, number:q.number, createdAt:q.createdAt, status:q.status, seller:q.seller, name:q.name, held};
+  const set = (id, v) => { if(v != null && v !== '') $('#'+id).value = v; };
+  set('c_name', q.name); set('c_company', q.company); set('c_phone', q.phone || q.phoneWa); set('c_email', q.email);
+  set('c_city', q.city); set('c_province', q.province); set('c_type', q.clientType);
+  set('c_current', q.currentLighting); set('c_source', q.source); set('q_notes', q.notes);
+  if(q.areaM2) $('#c_area').value = fmtM2(Number(q.areaM2)).replace(/\./g, '');
+  if(q.validityDays) $('#q_valid').value = q.validityDays;
+  $('#q_disc').value = Number(q.discountPct) || 0; st.discTouched = true;
+  $('#c_consent').checked = q.consent !== false;
+  $('#q_reserve').checked = !!q.reserve || !(q.items||[]).length;
+  st.interest = q.interest || 'tibio';
+  $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === st.interest));
+  st.pay = q.total ? payOf(q).pay : 'contado';
+  st.cart = (q.items||[]).map((l, i) => ({key: l.id || ('x' + Date.now() + i), sku: l.sku || '', name: l.name, price: Number(l.price)||0, qty: Number(l.qty)||1,
+    specUrl: l.specUrl || '', listPrice: l.listPrice || 0, d1: l.d1 || 0, d2: l.d2 || 0, usdPrice: l.usdPrice || null, usdRate: l.usdRate || null}));
+  syncCart();
+  $('#c_phone').dispatchEvent(new Event('input')); $('#c_area').dispatchEvent(new Event('input'));
+  renderEditBanner(); saveDraft(); closeSheet(); showTab('v-nueva'); renderPick();
+  toast('Cotización cargada: cambiá lo que necesites y guardá');
+}
+function renderEditBanner(){
+  const e = st.editing;
+  $('#editBanner').hidden = !e;
+  $('#editText').textContent = e ? `Modificando la cotización N° ${e.number}${e.name ? ' de ' + e.name : ''}` : '';
+  $('#saveBtn').textContent = e ? 'Guardar cambios y preparar WhatsApp' : 'Guardar y preparar WhatsApp';
+  $('#leadOnlyBtn').hidden = !!e;
+}
+$('#editCancel').addEventListener('click', () => { resetForm(); toast('Modificación cancelada, no se cambió nada'); });
 
 /* ---------- paneles ---------- */
 function sheet(html, opts){
@@ -966,7 +1018,7 @@ function waBlock(q, text, label){
 function leadText(q){ return `¡Hola ${(q.name||'').split(' ')[0]}! Soy ${q.seller || 'el equipo'} de Omnigro, gracias por pasar por el stand en la Expo Cannabis. Te agendo por acá: cuando quieras armamos la cotización para tu cultivo. 🌱`; }
 function openDone(q){
   const isLead = q.kind === 'contacto';
-  return sheet(`<div class="block done"><h3>${isLead ? 'Contacto' : 'Cotización ' + esc(q.number)}</h3>
+  return sheet(`<div class="block done"><h3>${isLead ? 'Contacto' : 'Cotización ' + esc(q.number) + (q.edit ? ' (modificada)' : '')}</h3>
       <div class="note" data-status>${isLead ? 'Guardando en la planilla…' : 'Guardando en la planilla y armando el PDF…'}</div></div>
     <div data-wa-area style="display:flex;flex-direction:column;gap:12px"><p class="note" style="margin:0">Un momento…</p></div>
     ${isLead ? '<button class="btn" type="button" data-specs>Enviar fichas técnicas</button>' : ''}
@@ -1039,8 +1091,9 @@ async function deleteQuote(q){
 /* ---------- contactos ---------- */
 function allQuotes(){
   const ids = new Set(st.contacts.map(q => q.id));
-  const local = st.pending.filter(p => !ids.has(p.id)).map(p => ({...p.data, id:p.id, _local:true}));
-  return local.concat(st.contacts).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const local = st.pending.filter(p => !ids.has(p.id) || p.data.edit).map(p => ({...p.data, id:p.id, _local:true}));
+  const localIds = new Set(local.map(q => q.id));
+  return local.concat(st.contacts.filter(q => !localIds.has(q.id))).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 ['#f_q','#f_interest','#f_status'].forEach(s => $(s).addEventListener('input', renderLeads));
 function filtered(){
@@ -1098,12 +1151,13 @@ function openLead(id){
     <label class="f">Notas internas<textarea id="d_notes">${esc(q.notes)}</textarea></label>
     <button class="btn primary" type="button" id="d_save">Guardar cambios</button>
     <h2 style="font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Mensajes</h2>
-    <div class="actions"><button class="btn small" type="button" data-m="quote"${q.items?.length ? '' : ' disabled'}>Reenviar cotización</button><button class="btn small" type="button" data-m="follow">Seguimiento post-expo</button><button class="btn small" type="button" data-specs>Fichas técnicas</button>${(q.items||[]).length ? `<button class="btn small" type="button" id="d_res">${q.reserve ? 'Liberar reserva' : 'Reservar stock'}</button>` : ''}</div>
+    <div class="actions"><button class="btn small" type="button" data-m="quote"${q.items?.length ? '' : ' disabled'}>Reenviar cotización</button><button class="btn small" type="button" data-m="follow">Seguimiento post-expo</button><button class="btn small" type="button" data-specs>Fichas técnicas</button><button class="btn small" type="button" id="d_edit">${(q.items||[]).length ? 'Modificar cotización' : 'Armar cotización'}</button>${(q.items||[]).length ? `<button class="btn small" type="button" id="d_res">${q.reserve ? 'Liberar reserva' : 'Reservar stock'}</button>` : ''}</div>
     <p class="note" style="margin:0">Al pasar la cotización a "Perdida" o borrarla, sus unidades vuelven al stock.</p>
     <div id="d_msg"></div>
     ${docBlock(q)}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button><button class="btn danger" type="button" id="d_del">Borrar contacto</button></div>`);
   wireDoc(p, q);
+  p.querySelector('#d_edit').addEventListener('click', () => startEdit(q));
   const del = p.querySelector('#d_del');
   del.addEventListener('click', async () => {
     if(del.dataset.armed !== '1'){ del.dataset.armed = '1'; del.textContent = 'Tocá de nuevo para borrar'; return; }
