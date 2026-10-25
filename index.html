@@ -258,7 +258,7 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
       <label class="f">Descuento expo (%)<input id="q_disc" type="number" inputmode="decimal" min="0" max="100" step="1"></label>
       <label class="f">Validez (días)<input id="q_valid" type="number" inputmode="numeric" min="1" step="1"></label>
     </div>
-    <label class="check" id="reserveRow" hidden><input type="checkbox" id="q_reserve" checked><span>Reservar estas unidades del stock de la expo (se bloquean para el resto del equipo)</span></label>
+    <label class="check" id="reserveRow" hidden><input type="checkbox" id="q_reserve"><span>Reservar estas unidades del stock de la expo (se bloquean para el resto del equipo)</span></label>
     <div class="warnline" id="stockWarn" hidden></div>
     <label class="f">Notas internas (no van al cliente)<textarea id="q_notes" placeholder="Lo que charlaron, carpa, plazos, forma de pago…"></textarea></label>
     <div class="f" style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:var(--muted)">Forma de pago</span>
@@ -442,7 +442,7 @@ function saveDraft(){ const d = {cart:st.cart, interest:st.interest, pay:st.pay,
 function loadDraft(){ const d = ls.get('og_draft', null); if(!d) return;
   DRAFT_FIELDS.forEach(f => { if(d[f] != null && d[f] !== '') $('#'+f).value = d[f]; });
   st.cart = Array.isArray(d.cart) ? d.cart : []; st.interest = d.interest || 'tibio'; st.pay = d.pay || 'contado'; $('#c_consent').checked = d.consent !== false;
-  st.editing = d.editing || null; if(d.reserve === false) $('#q_reserve').checked = false; renderEditBanner();
+  st.editing = d.editing || null; $('#q_reserve').checked = d.reserve === true; renderEditBanner();
   if(d.q_disc !== '' && d.q_disc != null) st.discTouched = true;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v===st.interest));
   $('#c_phone').dispatchEvent(new Event('input')); $('#c_area').dispatchEvent(new Event('input')); }
@@ -951,7 +951,7 @@ $('#leadOnlyBtn').addEventListener('click', () => save(true));
 $('#clearBtn').addEventListener('click', () => { resetForm(); toast('Formulario limpio'); });
 function resetForm(){
   ['c_name','c_company','c_phone','c_email','c_city','c_area','c_w','c_l','q_notes','x_name','x_price'].forEach(f => $('#'+f).value='');
-  $('#c_current').value=''; $('#c_cc').value = '54'; $('#c_consent').checked = true; $('#q_reserve').checked = true; st.cart = []; st.interest='tibio'; st.pay='contado'; st.discTouched=false;
+  $('#c_current').value=''; $('#c_cc').value = '54'; $('#c_consent').checked = true; $('#q_reserve').checked = false; st.cart = []; st.interest='tibio'; st.pay='contado'; st.discTouched=false;
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v==='tibio'));
   applySettingsToForm(true); $('#phoneHint').textContent = 'Código de área sin 0 ni 15'; $('#areaHint').textContent = '';
   st.editing = null; renderEditBanner();
@@ -974,7 +974,7 @@ function startEdit(q){
   if(q.validityDays) $('#q_valid').value = q.validityDays;
   $('#q_disc').value = Number(q.discountPct) || 0; st.discTouched = true;
   $('#c_consent').checked = q.consent !== false;
-  $('#q_reserve').checked = !!q.reserve || !(q.items||[]).length;
+  $('#q_reserve').checked = !!q.reserve;
   st.interest = q.interest || 'tibio';
   $('#interest').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === st.interest));
   st.pay = q.total ? payOf(q).pay : 'contado';
