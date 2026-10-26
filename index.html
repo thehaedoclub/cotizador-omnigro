@@ -147,8 +147,8 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px}
 .stat b{display:block;font-family:var(--f-display);font-stretch:105%;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;overflow-wrap:anywhere}
 .stat span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
-.filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
-@media (max-width:520px){.filters{grid-template-columns:1fr 1fr}.filters input{grid-column:1/-1}}
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px}
+@media (max-width:520px){.filters{grid-template-columns:1fr 1fr}.filters input,.filters #f_seller{grid-column:1/-1}}
 
 .lead{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}
@@ -282,6 +282,7 @@ pre.msg{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);fon
   <div class="stats" id="stats"></div>
   <div class="filters">
     <input id="f_q" placeholder="Buscar nombre, empresa, ciudad…" autocomplete="off">
+    <select id="f_seller" aria-label="Vendedor"><option value="">Todos los vendedores</option></select>
     <select id="f_interest"><option value="">Todo interés</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
     <select id="f_status"><option value="">Todo estado</option><option value="nueva">Nueva</option><option value="enviada">Enviada</option><option value="seguimiento">Seguimiento</option><option value="ganada">Ganada</option><option value="perdida">Perdida</option></select>
   </div>
@@ -1110,15 +1111,33 @@ function allQuotes(){
   return local.concat(st.contacts.filter(q => !localIds.has(q.id))).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 ['#f_q','#f_interest','#f_status'].forEach(s => $(s).addEventListener('input', renderLeads));
+// Vendedor: cada uno ve solo sus contactos para el seguimiento. Queda recordado en el teléfono.
+const sellerKey = x => String(x.seller || '').trim().toLowerCase();
+$('#f_seller').addEventListener('input', () => { ls.set('og_fseller', $('#f_seller').value); renderLeads(); });
+function renderSellerFilter(all){
+  const names = new Map();
+  all.forEach(x => { const k = sellerKey(x); if(k && !names.has(k)) names.set(k, String(x.seller).trim()); });
+  const cur = $('#f_seller').value || ls.get('og_fseller', '');
+  $('#f_seller').innerHTML = '<option value="">Todos los vendedores</option>'
+    + [...names].sort((a, b) => a[1].localeCompare(b[1])).map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join('')
+    + (all.some(x => !sellerKey(x)) ? '<option value="__none">Sin vendedor</option>' : '');
+  $('#f_seller').value = [...$('#f_seller').options].some(o => o.value === cur) ? cur : '';
+}
+function bySeller(list){
+  const v = $('#f_seller').value;
+  return !v ? list : list.filter(x => v === '__none' ? !sellerKey(x) : sellerKey(x) === v);
+}
 function filtered(){
   const q = $('#f_q').value.trim().toLowerCase(), i = $('#f_interest').value, s = $('#f_status').value;
-  return allQuotes().filter(x => (!i || x.interest===i) && (!s || x.status===s) &&
+  return bySeller(allQuotes()).filter(x => (!i || x.interest===i) && (!s || x.status===s) &&
     (!q || [x.name,x.company,x.city,x.province,x.phone,x.number,x.email].join(' ').toLowerCase().includes(q)));
 }
 function renderLeads(){
-  const all = allQuotes();
+  renderSellerFilter(allQuotes());
+  const all = bySeller(allQuotes()); // los números de arriba siguen al vendedor elegido
   const byCur = {}; all.forEach(x => { if(x.total) byCur[x.currency] = (byCur[x.currency]||0) + x.total; });
-  const totalTxt = Object.keys(byCur).length ? Object.entries(byCur).map(([c,v]) => money(v,c)).join(' + ') : money(0);
+  const short = (v, c) => v >= 1e6 ? `${c} ${(v / 1e6).toLocaleString('es-AR', {maximumFractionDigits: 1})} M` : money(v, c); // entra en el recuadro del celular
+  const totalTxt = Object.keys(byCur).length ? Object.entries(byCur).map(([c,v]) => short(v,c)).join(' + ') : money(0);
   $('#stats').innerHTML = [
     [all.length, 'Contactos'],
     [all.filter(x => x.kind !== 'contacto').length, 'Cotizaciones'],
